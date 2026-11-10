@@ -41,6 +41,8 @@ jobs:
       - name: Open or refresh sync PR
         env:
           GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+          # gh prefers the `upstream` remote added above; keep it on the fork.
+          GH_REPO: ${{ github.repository }}
         run: |
           behind=$(git rev-list --count origin/main..upstream/main)
           if [ "$behind" -eq 0 ]; then
