@@ -1,4 +1,4 @@
-import type { Node as SyntaxNode } from 'web-tree-sitter';
+import type { Node as SyntaxNode, Parser } from 'web-tree-sitter';
 import { Node, Edge, ExtractionResult, ExtractionError, UnresolvedReference, Language } from '../types';
 import { generateNodeId, NodeIdAllocator } from './tree-sitter-helpers';
 import { TreeSitterExtractor } from './tree-sitter';
@@ -167,14 +167,157 @@ export class CfmlExtractor {
       return;
     }
 
+    let hasError = false;
     try {
       const fileNode = this.createFileNode();
       this.walkProgram(tree.rootNode, fileNode.id);
+      hasError = tree.rootNode.hasError;
     } finally {
       // Trees hold wasm heap memory V8's GC never sees — free it per file.
       tree.delete();
     }
+    if (hasError) this.recoverDroppedFunctions(parser);
     this.extractTagExpressions();
+  }
+
+  /**
+   * The `cfml` grammar's error recovery can give up on the rest of a large
+   * file after stray `<`s in markup — raw SQL such as `a < "#x#" … b <> 1`
+   * written into a `<cfsavecontent>` — and every `<cffunction>` after that
+   * point comes back as loose tokens, not a function tag. A file that parsed
+   * with errors is checked against its own `<cffunction>` tags (outside
+   * comments, which nest in CFML); each one the walk didn't declare is parsed
+   * again on its own, the rest of the file blanked out with its line breaks
+   * kept, so every position is still the file's. What the first walk took
+   * from its lines — calls left to the component, or to a function recovery
+   * stretched over it — gives way to the re-extraction. A function whose own
+   * body is what breaks the parse is declared from its open and close tags
+   * alone, and is handed the calls the first walk found inside it. A function
+   * the first walk did declare ends at its own close tag.
+   */
+  private recoverDroppedFunctions(parser: Parser): void {
+    const spans = cffunctionSpans(this.source);
+    if (spans.length === 0) return;
+    const declared = new Set(
+      this.nodes.filter((n) => n.kind === 'method' || n.kind === 'function').map((n) => n.startLine)
+    );
+    const lineOf = (index: number): number => {
+      let line = 1;
+      for (let at = this.source.indexOf('\n'); at !== -1 && at < index; at = this.source.indexOf('\n', at + 1)) line++;
+      return line;
+    };
+
+    for (const span of spans) {
+      const startLine = lineOf(span.start);
+      const endLine = startLine + countBreaks(this.source, span.start, span.end);
+      if (declared.has(startLine)) {
+        // Error recovery can stretch a function over the ones after it; it
+        // ends at its own close tag.
+        for (const n of this.nodes) {
+          if ((n.kind === 'method' || n.kind === 'function') && n.startLine === startLine && n.endLine > endLine) n.endLine = endLine;
+        }
+        continue;
+      }
+      const owner = this.ownerAt(startLine);
+      if (!owner) continue;
+      const parentClassName = owner.kind === 'file' ? undefined : owner.name;
+
+      const whole = this.parseAlone(parser, [[span.start, span.end]], span.start);
+      if (whole) {
+        try {
+          this.dropExtractedBetween(startLine, endLine, span.start, span.end, owner.id);
+          this.visitTag(whole.tag, 'program', owner.id, parentClassName, true);
+        } finally {
+          whole.tree.delete();
+        }
+        continue;
+      }
+
+      const shell = this.parseAlone(parser, [[span.start, span.openEnd], [span.closeStart, span.end]], span.start);
+      if (!shell) continue;
+      try {
+        const before = this.nodes.length;
+        this.extractFunctionTag(shell.tag, parentClassName ? owner.id : undefined, owner.id, parentClassName);
+        const fn = this.nodes[before];
+        if (!fn) continue;
+        for (const ref of this.unresolvedReferences) {
+          if (ref.line >= startLine && ref.line <= endLine) ref.fromNodeId = fn.id;
+        }
+        for (const expr of this.tagExpressions) {
+          if (expr.startIndex >= span.start && expr.startIndex < span.end) expr.scopeId = fn.id;
+        }
+        this.walkBodyAlone(parser, span.openEnd, span.closeStart, fn.id);
+      } finally {
+        shell.tree.delete();
+      }
+    }
+  }
+
+  /**
+   * Walk a function body parsed on its own, for the tags that still parse
+   * before whatever breaks it — the whole file's parse can lose those too.
+   * What the first walk already found there isn't recorded twice.
+   */
+  private walkBodyAlone(parser: Parser, from: number, to: number, fnId: string): void {
+    const tree = parser.parse(this.masked([[from, to]]));
+    if (!tree) return;
+    const refKey = (r: UnresolvedReference): string => `${r.referenceKind}|${r.referenceName}|${r.line}|${r.column}`;
+    const refsBefore = this.unresolvedReferences.length;
+    const exprsBefore = this.tagExpressions.length;
+    try {
+      this.delegateNestedTags(tree.rootNode, fnId);
+    } finally {
+      tree.delete();
+    }
+    const seenRefs = new Set(this.unresolvedReferences.slice(0, refsBefore).map(refKey));
+    const seenExprs = new Set(this.tagExpressions.slice(0, exprsBefore).map((e) => e.startIndex));
+    this.unresolvedReferences = this.unresolvedReferences.filter((r, i) => i < refsBefore || !seenRefs.has(refKey(r)));
+    this.tagExpressions = this.tagExpressions.filter((e, i) => i < exprsBefore || !seenExprs.has(e.startIndex));
+  }
+
+  /** The source with everything outside the `keep` ranges blanked, line breaks kept — so every position is the file's. */
+  private masked(keep: Array<[number, number]>): string {
+    const chars = this.source.replace(/[^\r\n]/g, ' ').split('');
+    for (const [from, to] of keep) for (let i = from; i < to; i++) chars[i] = this.source[i]!;
+    return chars.join('');
+  }
+
+  /** The innermost component or interface declared around `line`, else the file. */
+  private ownerAt(line: number): Node | undefined {
+    let owner: Node | undefined = this.nodes.find((n) => n.kind === 'file');
+    for (const n of this.nodes) {
+      if ((n.kind === 'class' || n.kind === 'interface') && n.startLine <= line && n.endLine >= line) owner = n;
+    }
+    return owner;
+  }
+
+  /** Parse only the `keep` ranges of the source (everything else blanked, line breaks kept); the function tag starting at `start`, if it parses as one. */
+  private parseAlone(
+    parser: Parser,
+    keep: Array<[number, number]>,
+    start: number
+  ): { tree: NonNullable<ReturnType<Parser['parse']>>; tag: SyntaxNode } | undefined {
+    const tree = parser.parse(this.masked(keep));
+    if (!tree) return undefined;
+    const tag = tree.rootNode.descendantsOfType('cf_function_tag').find((n) => n?.startIndex === start);
+    if (tag) return { tree, tag };
+    tree.delete();
+    return undefined;
+  }
+
+  /** Forget what the first walk extracted from a span that is about to be extracted again. */
+  private dropExtractedBetween(startLine: number, endLine: number, start: number, end: number, ownerId: string): void {
+    const dropped = new Set(
+      this.nodes
+        .filter((n) => n.kind !== 'file' && n.id !== ownerId && n.startLine >= startLine && n.startLine <= endLine)
+        .map((n) => n.id)
+    );
+    if (dropped.size > 0) {
+      this.nodes = this.nodes.filter((n) => !dropped.has(n.id));
+      this.edges = this.edges.filter((e) => !dropped.has(e.source) && !dropped.has(e.target));
+    }
+    this.unresolvedReferences = this.unresolvedReferences.filter((r) => r.line < startLine || r.line > endLine);
+    this.tagExpressions = this.tagExpressions.filter((e) => e.startIndex < start || e.startIndex >= end);
   }
 
   /** Build the file's own `kind:'file'` node, spanning the whole source. Tag-based files need this explicitly — unlike `extractBareScript` (which delegates the whole file to `TreeSitterExtractor` and inherits its file node), `extractTagBased` walks the tree itself and has no other source of one. */
@@ -439,6 +582,17 @@ export class CfmlExtractor {
         if (name === 'invoke') this.extractInvokeTag(node, containerId);
         break;
       }
+      case 'cf_start_tag':
+        // A `<cfinvoke …>` whose tag the parser lost in an error — only its
+        // start tag is left, loose in the ERROR node. (A whole tag's start tag
+        // is reached through the tag, above, never as an ERROR's child.)
+        if (parentType === 'ERROR') {
+          const nameNode = node.namedChildren.find((c: SyntaxNode) => c.type === 'cf_tag_name');
+          if (nameNode && this.source.substring(nameNode.startIndex, nameNode.endIndex).toLowerCase() === 'invoke') {
+            this.extractInvokeTag(node, containerId);
+          }
+        }
+        break;
       default:
         if (TAG_EXPRESSION_PARENTS.has(parentType) && TAG_EXPRESSION_TYPES.has(node.type)) {
           this.addTagExpression(node, containerId);
@@ -884,6 +1038,69 @@ export class CfmlExtractor {
  * and `//`/`/* *\/` comments to find the first real token; tag-based files
  * start with `<`, script-based files don't.
  */
+/** Line breaks in `source` between `from` and `to`. */
+function countBreaks(source: string, from: number, to: number): number {
+  let n = 0;
+  for (let at = source.indexOf('\n', from); at !== -1 && at < to; at = source.indexOf('\n', at + 1)) n++;
+  return n;
+}
+
+/** Index just past the `>` that ends the tag whose attributes start at `from` (a `>` inside a quoted value doesn't), or -1. */
+function tagEnd(source: string, from: number): number {
+  let quote: string | undefined;
+  for (let i = from; i < source.length; i++) {
+    const c = source[i];
+    if (quote) {
+      if (c === quote) quote = undefined;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+    } else if (c === '>') {
+      return i + 1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Each `<cffunction>…</cffunction>` in tag-based source, outside CFML
+ * comments (`<!--- … --->`, which nest): where it starts, where its open tag
+ * ends, where its close tag starts and where that ends.
+ */
+export function cffunctionSpans(source: string): Array<{ start: number; openEnd: number; closeStart: number; end: number }> {
+  const lower = source.toLowerCase();
+  const spans: Array<{ start: number; openEnd: number; closeStart: number; end: number }> = [];
+  let depth = 0;
+  let open: { start: number; openEnd: number } | undefined;
+  let i = 0;
+  while (i < lower.length) {
+    if (lower.startsWith('<!---', i)) {
+      depth++;
+      i += 5;
+    } else if (depth > 0) {
+      if (lower.startsWith('--->', i)) {
+        depth--;
+        i += 4;
+      } else {
+        i++;
+      }
+    } else if (lower.startsWith('<cffunction', i) && !/[\w.:-]/.test(lower[i + 11] ?? '')) {
+      const openEnd = tagEnd(source, i + 11);
+      if (openEnd === -1) break;
+      open = { start: i, openEnd };
+      i = openEnd;
+    } else if (open && lower.startsWith('</cffunction', i)) {
+      const end = lower.indexOf('>', i);
+      if (end === -1) break;
+      spans.push({ ...open, closeStart: i, end: end + 1 });
+      open = undefined;
+      i = end + 1;
+    } else {
+      i++;
+    }
+  }
+  return spans;
+}
+
 export function isBareScriptCfml(source: string): boolean {
   let i = 0;
   const len = source.length;
