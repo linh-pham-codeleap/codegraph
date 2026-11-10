@@ -5,7 +5,7 @@ This is a fork of [colbymchenry/codegraph](https://github.com/colbymchenry/codeg
 - **`<cfinvoke>` calls are indexed.** `<cfinvoke component="a.b.Svc" method="run">` links to `Svc.run` (or the method `Svc` inherits), so `callers`, `impact` and `codegraph_explore` see calls made through `<cfinvoke>`. This includes component paths with a runtime prefix (`component="#application.cfcRoot#.Svc"`) and `<cfinvoke method="run">` without a component.
 - Everything merged upstream since the last official release, such as the `createObject("component", …)` and `<cfinclude>` fixes. The fork syncs with upstream `main` through a daily PR.
 
-Releases are tagged **`vX.Y.Z-cf.N`**: upstream version `X.Y.Z` plus fork build `N`, for example `v1.6.2-cf.1`. A `-cf` version is never an official CodeGraph release. Everything else works as upstream does; see the [main README](README.md).
+Releases are tagged **`vX.Y.Z-cf.N`**: upstream version `X.Y.Z` plus fork build `N`, for example `v1.6.2-cf.1`. A `-cf` version is never an official CodeGraph release. Everything else works as upstream does; see the [main README](../README.md).
 
 ## Install
 

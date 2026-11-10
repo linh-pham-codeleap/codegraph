@@ -101,7 +101,7 @@ jobs:
             echo "Already on the fork? \`codegraph upgrade\`. Then rebuild indexes: \`codegraph index -f .\`"
             echo
             echo "### Fork-only changes"
-            git log --no-merges --format='- %s (%h)' upstream/main..HEAD -- . ':!.github' ':!FORK.md' ':!README.md' || true
+            git log --no-merges --format='- %s (%h)' upstream/main..HEAD -- . ':!.github' ':!README.md' || true
             if [ -n "$prev" ]; then
               echo
               echo "### Since $prev"
