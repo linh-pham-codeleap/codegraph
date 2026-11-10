@@ -113,6 +113,9 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          # Pin the repo: the notes step added an `upstream` remote, and gh
+          # prefers that over `origin`, so it would target colbymchenry/codegraph.
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release create "${{ steps.version.outputs.tag }}" release/codegraph-* release/SHA256SUMS \
             --target "$GITHUB_SHA" \
