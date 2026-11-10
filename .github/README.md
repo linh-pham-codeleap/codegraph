@@ -3,6 +3,9 @@
 This is a fork of [colbymchenry/codegraph](https://github.com/colbymchenry/codegraph) with extra CFML support that isn't in an official release yet:
 
 - **`<cfinvoke>` calls are indexed.** `<cfinvoke component="a.b.Svc" method="run">` links to `Svc.run` (or the method `Svc` inherits), so `callers`, `impact` and `codegraph_explore` see calls made through `<cfinvoke>`. This includes component paths with a runtime prefix (`component="#application.cfcRoot#.Svc"`) and `<cfinvoke method="run">` without a component.
+- **Component paths ignore case**, as CFML does: `api.myService` finds `api/MyService.cfc`.
+- **Runtime-prefixed names find the right component.** When two components share a name, a call goes to the one that has the method.
+- **Functions the parser loses are recovered.** In very large tag-based components, the CFML grammar can give up after a stray `<` or quote in markup and drop every `<cffunction>` after it. Those functions are now parsed again on their own, with their callers and calls.
 - Everything merged upstream since the last official release, such as the `createObject("component", …)` and `<cfinclude>` fixes. The fork syncs with upstream `main` through a daily PR.
 
 Releases are tagged **`vX.Y.Z-cf.N`**: upstream version `X.Y.Z` plus fork build `N`, for example `v1.6.2-cf.1`. A `-cf` version is never an official CodeGraph release. Everything else works as upstream does; see the [main README](../README.md).
@@ -100,6 +103,7 @@ The workflow tags `v<upstream version>-cf.<next N>` and builds bundles for macOS
 ## Known gaps (CFML)
 
 - A component in a variable (`component="#oSvc#"`) or a method named at runtime (`method="#m#"`) can't be linked.
-- A bare component name that two components share is left unlinked rather than guessed.
-- A dotted path whose case doesn't match the file name (`api.myService` for `api/MyService.cfc`) doesn't resolve.
+- A bare component name that several components share is left unlinked when more than one of them has the method, rather than guessed.
+- A component that isn't in the repo (a server mapping, a vendored library you don't commit) can't be linked.
+- A function in scope (`application.fn = function…`) isn't a symbol yet, so calls to it aren't linked.
 - `invoke("svc", "run")` and script-style `cfinvoke(…)` aren't covered yet.
