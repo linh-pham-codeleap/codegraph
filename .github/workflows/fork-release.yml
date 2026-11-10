@@ -1,0 +1,121 @@
+# Fork-only release: builds the self-contained bundles that install.sh /
+# install.ps1 / `codegraph upgrade` download, and publishes them as a GitHub
+# Release of THIS fork, tagged v<upstream version>-cf.<n> (e.g. v1.6.2-cf.1)
+# so it can never be mistaken for an official colbymchenry/codegraph release.
+#
+# Run it from the Actions tab ("Fork release" → Run workflow) after merging
+# what you want to ship (e.g. an upstream sync PR). <n> counts up per
+# upstream version automatically; the version in package.json is only
+# rewritten inside the build, never committed.
+#
+# Differences from upstream's release.yml: no npm publish, no CHANGELOG
+# promotion, and no native Rust kernel — bundles use the wasm extraction
+# path, which indexes the same graph, a little slower.
+name: Fork release
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: Create the release as a draft (publish it by hand afterwards)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'linh-pham-codeleap/codegraph'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Ensure zip/unzip
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zip unzip
+
+      - name: Resolve version
+        id: version
+        run: |
+          base=$(node -p "require('./package.json').version.split('-')[0]")
+          last=$(git tag -l "v${base}-cf.*" | sed -E "s/^v${base}-cf\.//" | grep -E '^[0-9]+$' | sort -n | tail -1)
+          n=$(( ${last:-0} + 1 ))
+          version="${base}-cf.${n}"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$version (upstream base $base)"
+
+      - name: Stamp version (build only, not committed)
+        run: |
+          npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --ignore-scripts
+          node scripts/sync-ui-version.mjs
+
+      - run: npm ci
+
+      - name: Build all platform bundles
+        run: |
+          for t in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64 win32-arm64; do
+            bash scripts/build-bundle.sh "$t"
+          done
+          ls -la release/
+
+      - name: Smoke-test the linux-x64 bundle
+        run: |
+          mkdir -p /tmp/cg && tar -xzf release/codegraph-linux-x64.tar.gz -C /tmp/cg --strip-components=1
+          got=$(/tmp/cg/bin/codegraph --version)
+          echo "bundle reports $got"
+          [ "$got" = "${{ steps.version.outputs.version }}" ] || { echo "::error::bundle reports $got"; exit 1; }
+
+      - name: Generate SHA256SUMS
+        run: cd release && sha256sum codegraph-* > SHA256SUMS && cat SHA256SUMS
+
+      - name: Release notes
+        run: |
+          git remote add upstream https://github.com/colbymchenry/codegraph.git
+          git fetch --no-tags -q upstream main
+          prev=$(git tag -l 'v*-cf.*' --sort=-v:refname | head -1)
+          {
+            echo "CFML fork of [colbymchenry/codegraph](https://github.com/colbymchenry/codegraph), based on upstream **v${{ steps.version.outputs.base }}** plus everything merged upstream since. **Not an official CodeGraph release.**"
+            echo
+            echo "### Install / update"
+            echo
+            echo '```bash'
+            echo "# macOS / Linux"
+            echo "curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sh"
+            echo '```'
+            echo '```powershell'
+            echo "# Windows"
+            echo "irm https://raw.githubusercontent.com/${{ github.repository }}/main/install.ps1 | iex"
+            echo '```'
+            echo "Already on the fork? \`codegraph upgrade\`. Then rebuild indexes: \`codegraph index -f .\`"
+            echo
+            echo "### Fork-only changes"
+            git log --no-merges --format='- %s (%h)' upstream/main..HEAD -- . ':!.github' ':!FORK.md' ':!README.md' || true
+            if [ -n "$prev" ]; then
+              echo
+              echo "### Since $prev"
+              git log --no-merges --format='- %s (%h)' "$prev"..HEAD | head -80
+            fi
+          } > notes.md
+          cat notes.md
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" release/codegraph-* release/SHA256SUMS \
+            --target "$GITHUB_SHA" \
+            --title "${{ steps.version.outputs.tag }} (CFML fork)" \
+            --notes-file notes.md \
+            ${{ inputs.draft && '--draft' || '--latest' }}

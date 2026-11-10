@@ -32,7 +32,7 @@ import * as https from 'https';
 import { spawnSync } from 'child_process';
 import { ansiColorsEnabled } from '../ui/color';
 
-export const REPO = 'colbymchenry/codegraph';
+export const REPO = 'linh-pham-codeleap/codegraph'; // CFML fork: installs + upgrades come from the fork's -cf releases
 export const NPM_PACKAGE = '@colbymchenry/codegraph';
 const RAW_BASE = `https://raw.githubusercontent.com/${REPO}/main`;
 export const INSTALL_SH_URL = `${RAW_BASE}/install.sh`;
@@ -255,7 +255,34 @@ export function compareVersions(a: string, b: string): number {
   // A prerelease is "less than" its release (1.0.0-rc < 1.0.0).
   if (sa.pre && !sb.pre) return -1;
   if (!sa.pre && sb.pre) return 1;
-  if (sa.pre && sb.pre) return sa.pre < sb.pre ? -1 : sa.pre > sb.pre ? 1 : 0;
+  if (sa.pre && sb.pre) return comparePrerelease(sa.pre, sb.pre);
+  return 0;
+}
+
+/**
+ * Semver prerelease order: dot-separated identifiers left to right, numeric
+ * ones compared as numbers (`cf.10` > `cf.9`), numeric below alphanumeric,
+ * and a shorter list below a longer one it prefixes.
+ */
+function comparePrerelease(a: string, b: string): number {
+  const pa = a.split('.');
+  const pb = b.split('.');
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i];
+    const y = pb[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    const nx = /^\d+$/.test(x);
+    const ny = /^\d+$/.test(y);
+    if (nx && ny) {
+      const d = parseInt(x, 10) - parseInt(y, 10);
+      if (d !== 0) return d;
+    } else if (nx !== ny) {
+      return nx ? -1 : 1;
+    } else if (x !== y) {
+      return x < y ? -1 : 1;
+    }
+  }
   return 0;
 }
 
@@ -748,7 +775,7 @@ export const WINDOWS_SWAP_FUNCTION = String.raw`function Install-CodeGraphFiles(
     $lost = Undo-Logged
     $msg = "Could not replace $at ($($x.Message))."
     if ($lost) {
-      $msg += " $lost file(s) could not be put back, so the install may not start. Close your agent sessions and any running codegraph commands, then reinstall: irm https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1 | iex"
+      $msg += " $lost file(s) could not be put back, so the install may not start. Close your agent sessions and any running codegraph commands, then reinstall: irm https://raw.githubusercontent.com/linh-pham-codeleap/codegraph/main/install.ps1 | iex"
     } else {
       $msg += " Nothing was changed: the existing install still works. If another program has CodeGraph's files open, close your agent sessions (they run the CodeGraph MCP server) and any running codegraph commands, then try again."
     }

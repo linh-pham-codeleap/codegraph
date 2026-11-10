@@ -6,7 +6,7 @@
 # GitHub Releases. No Node.js, no build tools, no npm required — ideal for a
 # fresh Linux VPS over SSH.
 #
-#   curl -fsSL https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/linh-pham-codeleap/codegraph/main/install.sh | sh
 #
 # Upgrade:   run `codegraph upgrade` (or just re-run the same command).
 # Uninstall: curl -fsSL .../install.sh | sh -s -- --uninstall
@@ -17,7 +17,7 @@
 #   CODEGRAPH_BIN_DIR      symlink location  (default: ~/.local/bin)
 set -eu
 
-REPO="colbymchenry/codegraph"
+REPO="linh-pham-codeleap/codegraph"
 INSTALL_DIR="${CODEGRAPH_INSTALL_DIR:-$HOME/.codegraph}"
 BIN_DIR="${CODEGRAPH_BIN_DIR:-$HOME/.local/bin}"
 
@@ -36,7 +36,7 @@ case "$os" in
   Linux)  os="linux" ;;
   MINGW*|MSYS*|CYGWIN*)
     echo "codegraph: on Windows, open PowerShell and run:" >&2
-    echo "  irm https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1 | iex" >&2
+    echo "  irm https://raw.githubusercontent.com/linh-pham-codeleap/codegraph/main/install.ps1 | iex" >&2
     exit 1
     ;;
   *) echo "codegraph: unsupported OS '$os'." >&2; exit 1 ;;
