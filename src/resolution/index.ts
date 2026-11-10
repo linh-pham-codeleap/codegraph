@@ -3899,9 +3899,9 @@ export class ReferenceResolver {
    * directory segment (a dotted path whose only same-named class sits in an
    * unrelated directory is almost always an out-of-repo library supertype —
    * mxunit/testbox/coldbox-as-dependency), and a corroboration tie yields no
-   * edge. Directory comparison is case-insensitive (CFML path resolution is);
-   * the class segment itself is matched exactly, which real code satisfies —
-   * dotted paths are written to match the on-disk file name.
+   * edge. Comparison ignores case throughout, as CFML path resolution does:
+   * directory segments and the class segment alike (`api.myService` names
+   * `api/MyService.cfc`).
    *
    * A test suite is no candidate for production code (#2209's rule), and on a
    * tie it yields to the one component outside the test suites (#2650): a
@@ -3916,9 +3916,12 @@ export class ReferenceResolver {
    * corroborates, and the file must be named like the component.
    */
   private resolveCfmlComponentPath(ref: UnresolvedRef): ResolvedRef | null {
+    // CFML names ignore case, and code written on a case-blind file system
+    // spells a path however it likes (`gptapi.usermanager` for
+    // `gptapi/userManager.cfc`), so the class segment matches ignoring case.
     const cfmlCandidates = (name: string): Node[] =>
       this.context
-        .getNodesByName(name)
+        .getNodesByLowerName(name.toLowerCase())
         .filter(
           (n) =>
             (n.kind === 'class' || n.kind === 'interface') &&
@@ -4011,18 +4014,36 @@ export class ReferenceResolver {
     const match = CFML_CONSTRUCTED_CALL.exec(ref.referenceName);
     if (!match) return null;
     const component = match[1]!;
+    const lowerMethod = match[2]!.toLowerCase();
     const cls = component.includes('.')
       ? this.nodeById(this.resolveCfmlComponentPath({ ...ref, referenceName: component, referenceKind: 'instantiates' })?.targetNodeId ?? '')
       : this.cfmlComponentByName(component, ref.filePath);
-    const method = cls ? this.cfmlMethodOf(cls, match[2]!.toLowerCase(), new Set()) : undefined;
-    return method ? { original: ref, targetNodeId: method.id, confidence: 0.9, resolvedBy: 'instance-method' } : null;
+    const method = cls ? this.cfmlMethodOf(cls, lowerMethod, new Set()) : undefined;
+    if (method) return { original: ref, targetNodeId: method.id, confidence: 0.9, resolvedBy: 'instance-method' };
+    if (component.includes('.')) return null;
+    // A bare name several components share, or one beside the caller that
+    // lacks the method: usually the tail of a path behind a runtime prefix
+    // (`component="#application.cfcRoot#.userManager"`), which can point
+    // anywhere. A call that runs reaches a component that has the method, so
+    // the one same-named component that has it is the target.
+    const owners = this.cfmlComponentsNamed(component)
+      .map((c) => this.cfmlMethodOf(c, lowerMethod, new Set()))
+      .filter((m): m is Node => m !== undefined);
+    return owners.length === 1
+      ? { original: ref, targetNodeId: owners[0]!.id, confidence: 0.8, resolvedBy: 'instance-method' }
+      : null;
+  }
+
+  /** Every CFML component or interface with this name, ignoring case. */
+  private cfmlComponentsNamed(name: string): Node[] {
+    return this.context
+      .getNodesByLowerName(name.toLowerCase())
+      .filter((n) => (n.kind === 'class' || n.kind === 'interface') && (n.language === 'cfml' || n.language === 'cfscript'));
   }
 
   /** The CFML component a bare name reaches from `fromFile`: the one in its directory, else the only one so named. */
   private cfmlComponentByName(name: string, fromFile: string): Node | undefined {
-    const components = this.context
-      .getNodesByLowerName(name.toLowerCase())
-      .filter((n) => (n.kind === 'class' || n.kind === 'interface') && (n.language === 'cfml' || n.language === 'cfscript'));
+    const components = this.cfmlComponentsNamed(name);
     const dirOf = (p: string): string => p.slice(0, p.lastIndexOf('/') + 1);
     const beside = components.filter((n) => dirOf(n.filePath) === dirOf(fromFile));
     if (beside.length === 1) return beside[0];
