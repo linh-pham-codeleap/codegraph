@@ -278,6 +278,10 @@ describe('version helpers', () => {
     expect(compareVersions('1.0.0', '1.1.0')).toBeLessThan(0);
     expect(compareVersions('v2.0.0', '2.0.0')).toBe(0);
     expect(compareVersions('1.0.0-rc.1', '1.0.0')).toBeLessThan(0);
+    // CFML fork releases: numeric prerelease parts compare as numbers.
+    expect(compareVersions('1.6.2-cf.10', '1.6.2-cf.9')).toBeGreaterThan(0);
+    expect(compareVersions('1.6.2-cf.2', '1.6.2-cf.2')).toBe(0);
+    expect(compareVersions('1.6.3-cf.1', '1.6.2-cf.12')).toBeGreaterThan(0);
   });
 
   it('isUpdateAvailable compares, and falls back to string-inequality for unparseable', () => {

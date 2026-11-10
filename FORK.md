@@ -3,43 +3,35 @@
 This is a fork of [colbymchenry/codegraph](https://github.com/colbymchenry/codegraph) with extra CFML support that isn't in an official release yet:
 
 - **`<cfinvoke>` calls are indexed.** `<cfinvoke component="a.b.Svc" method="run">` links to `Svc.run` (or the method `Svc` inherits), so `callers`, `impact` and `codegraph_explore` see calls made through `<cfinvoke>`. This includes component paths with a runtime prefix (`component="#application.cfcRoot#.Svc"`) and `<cfinvoke method="run">` without a component.
-- Everything merged upstream since the last release, such as the `createObject("component", …)` and `<cfinclude>` fixes. The fork syncs with upstream `main` through a daily PR.
+- Everything merged upstream since the last official release, such as the `createObject("component", …)` and `<cfinclude>` fixes. The fork syncs with upstream `main` through a daily PR.
 
-Everything else works exactly as upstream; see the [main README](README.md).
+Releases are tagged **`vX.Y.Z-cf.N`**: upstream version `X.Y.Z` plus fork build `N`, for example `v1.6.2-cf.1`. A `-cf` version is never an official CodeGraph release. Everything else works as upstream does; see the [main README](README.md).
 
 ## Install
 
-You need **Git** and **Node.js 22.12 or later, below 25** (`node --version`).
+No Node, Git or build tools needed. The installer downloads a self-contained bundle from this fork's [Releases](https://github.com/linh-pham-codeleap/codegraph/releases).
+
+**macOS / Linux**
 
 ```bash
-git clone https://github.com/linh-pham-codeleap/codegraph.git
-cd codegraph
-npm ci
-npm run build
-npm install -g .
+curl -fsSL https://raw.githubusercontent.com/linh-pham-codeleap/codegraph/main/install.sh | sh
 ```
 
-`npm install -g .` links the global `codegraph` command to this folder, so **keep the folder**: deleting or moving it breaks the command.
+**Windows (PowerShell)**
 
-### If you already have the official CodeGraph
+```powershell
+irm https://raw.githubusercontent.com/linh-pham-codeleap/codegraph/main/install.ps1 | iex
+```
 
-The official installer puts `codegraph` in `~/.local/bin` (macOS/Linux) and that usually comes before npm's global bin on `PATH`, so you would keep running the official build. Check which one runs:
+Check it:
 
 ```bash
-which -a codegraph   # first line is the one that runs
+codegraph --version   # e.g. 1.6.2-cf.1 — the -cf suffix means you're on the fork
 ```
 
-To use the fork, remove the official CLI's launcher and its bundled versions. Your agent setup and project indexes are left alone. Then check again:
+**Already have the official CodeGraph?** Run the same command. It installs into the same place (`~/.codegraph`, launcher in `~/.local/bin`) and replaces the official build. Your agent setup and project indexes stay as they are. If you installed the official one with `npm i -g @colbymchenry/codegraph`, remove that first (`npm rm -g @colbymchenry/codegraph`), or it may stay first on `PATH`. The installer warns you when that happens.
 
-```bash
-rm ~/.local/bin/codegraph
-rm -rf ~/.codegraph/versions
-which codegraph       # should now be inside npm's global bin (npm prefix -g)
-```
-
-(Don't use `codegraph uninstall` for this: it also removes CodeGraph from your agents.)
-
-> **Don't run `codegraph upgrade`.** It installs the official release over this fork. Update with the steps below instead.
+Pin a version with `CODEGRAPH_VERSION=v1.6.2-cf.1` before `sh`.
 
 ### Connect your agent
 
@@ -49,11 +41,11 @@ If CodeGraph isn't set up in your agent yet (Claude Code, Cursor, Codex, …):
 codegraph install
 ```
 
-Agents start `codegraph` by name from `PATH`, so once `which codegraph` points to the fork they use it too. Restart the agent afterwards.
+Agents start `codegraph` from `PATH`, so they use the fork once `codegraph --version` shows `-cf`. Restart the agent afterwards.
 
 ## Index your project
 
-The fork extracts more than the official build did, so rebuild any existing index once:
+The fork extracts more than the official build, so rebuild any existing index once:
 
 ```bash
 cd /path/to/your/cfml-project
@@ -70,21 +62,40 @@ codegraph callers <aMethodYouCallThroughCfinvoke>
 ## Update
 
 ```bash
-cd /path/to/codegraph   # the folder you cloned
-git pull
-npm ci
-npm run build
+codegraph upgrade
 ```
 
-There's no need to reinstall, since the global command already points here. Then rebuild your project indexes with `codegraph index -f .`.
+On the fork, `upgrade` installs the fork's latest `-cf` release (`codegraph upgrade --check` only reports it). Rebuild project indexes afterwards with `codegraph index -f .`.
 
-## Uninstall
+## Uninstall / back to official
 
 ```bash
-npm uninstall -g @colbymchenry/codegraph
+curl -fsSL https://raw.githubusercontent.com/linh-pham-codeleap/codegraph/main/install.sh | sh -s -- --uninstall
 ```
 
-Then delete the cloned folder. To go back to the official build, run its installer: `curl -fsSL https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.sh | sh`.
+To go back to the official build instead, run its installer, which replaces the fork:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.sh | sh
+```
+
+## Build from source (contributors)
+
+You need Node.js 22.12 or later, below 25:
+
+```bash
+git clone https://github.com/linh-pham-codeleap/codegraph.git
+cd codegraph
+npm ci && npm run build
+node dist/bin/codegraph.js --help
+```
+
+## Releasing (maintainer)
+
+1. Merge what you want to ship, for example the daily upstream sync PR. Use a **merge commit**.
+2. Go to Actions → **Fork release** → Run workflow.
+
+The workflow tags `v<upstream version>-cf.<next N>` and builds bundles for macOS, Linux and Windows (x64 and arm64). It smoke-tests one bundle, then publishes the Release, which the installers and `codegraph upgrade` pick up. Bundles skip upstream's optional native Rust kernel and use the wasm extraction path, which gives the same graph a little slower.
 
 ## Known gaps (CFML)
 

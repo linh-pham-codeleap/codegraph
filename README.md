@@ -1,4 +1,4 @@
-> **ColdFusion (CFML) fork.** This fork adds `<cfinvoke>` call indexing and the latest unreleased CFML fixes. **To install and use it, see [FORK.md](FORK.md).** `codegraph upgrade` installs the official release over it.
+> **ColdFusion (CFML) fork** — adds `<cfinvoke>` call indexing and the latest unreleased CFML fixes. Releases are tagged `vX.Y.Z-cf.N`. **Install:** `curl -fsSL https://raw.githubusercontent.com/linh-pham-codeleap/codegraph/main/install.sh | sh` — details in [FORK.md](FORK.md).
 
 <div align="center">
 

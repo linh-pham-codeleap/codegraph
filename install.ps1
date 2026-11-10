@@ -3,7 +3,7 @@
 # Downloads a self-contained bundle (a vendored Node runtime + the app) from
 # GitHub Releases. No Node.js, no build tools required.
 #
-#   irm https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/linh-pham-codeleap/codegraph/main/install.ps1 | iex
 #
 # Upgrade with `codegraph upgrade` (or just re-run this -- safe even while agent
 # sessions are running CodeGraph). To uninstall: remove
@@ -69,7 +69,7 @@ function Install-CodeGraphFiles([string]$Stage, [string]$Dest) {
     $lost = Undo-Logged
     $msg = "Could not replace $at ($($x.Message))."
     if ($lost) {
-      $msg += " $lost file(s) could not be put back, so the install may not start. Close your agent sessions and any running codegraph commands, then reinstall: irm https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1 | iex"
+      $msg += " $lost file(s) could not be put back, so the install may not start. Close your agent sessions and any running codegraph commands, then reinstall: irm https://raw.githubusercontent.com/linh-pham-codeleap/codegraph/main/install.ps1 | iex"
     } else {
       $msg += " Nothing was changed: the existing install still works. If another program has CodeGraph's files open, close your agent sessions (they run the CodeGraph MCP server) and any running codegraph commands, then try again."
     }
@@ -89,7 +89,7 @@ function Install-CodeGraphFiles([string]$Stage, [string]$Dest) {
 }
 # <<< Install-CodeGraphFiles
 
-$repo = 'colbymchenry/codegraph'
+$repo = 'linh-pham-codeleap/codegraph'
 $installDir = if ($env:CODEGRAPH_INSTALL_DIR) { $env:CODEGRAPH_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'codegraph' }
 
 # 1. Detect architecture -> target matching the release archives.

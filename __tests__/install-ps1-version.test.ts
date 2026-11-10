@@ -23,7 +23,7 @@ import type { AddressInfo } from 'net';
 import * as path from 'path';
 
 const INSTALL_PS1 = path.join(__dirname, '..', 'install.ps1');
-const REPO = 'colbymchenry/codegraph';
+const REPO = 'linh-pham-codeleap/codegraph';
 
 /** The resolver exactly as install.ps1 ships it. */
 function extractResolver(): string {
