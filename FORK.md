@@ -29,12 +29,15 @@ The official installer puts `codegraph` in `~/.local/bin` (macOS/Linux) and that
 which -a codegraph   # first line is the one that runs
 ```
 
-To use the fork, remove the official CLI but keep your agent setup, then check again:
+To use the fork, remove the official CLI's launcher and its bundled versions. Your agent setup and project indexes are left alone. Then check again:
 
 ```bash
-codegraph uninstall --keep-cli=false --yes   # or delete ~/.local/bin/codegraph by hand
-which codegraph       # should be inside npm's global bin
+rm ~/.local/bin/codegraph
+rm -rf ~/.codegraph/versions
+which codegraph       # should now be inside npm's global bin (npm prefix -g)
 ```
+
+(Don't use `codegraph uninstall` for this: it also removes CodeGraph from your agents.)
 
 > **Don't run `codegraph upgrade`.** It installs the official release over this fork. Update with the steps below instead.
 
