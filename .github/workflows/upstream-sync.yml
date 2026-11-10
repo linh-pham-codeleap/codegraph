@@ -1,0 +1,73 @@
+# Fork-only: opens (or refreshes) a PR whenever colbymchenry/codegraph main
+# has commits this fork's main doesn't. The PR head is `upstream-sync`, an
+# exact copy of upstream main; GitHub shows any conflict with fork-only
+# commits (e.g. CHANGELOG) in the PR, to resolve there.
+#
+# Merge these PRs with a MERGE COMMIT, not squash/rebase, so upstream's
+# commits keep their SHAs and the next sync only carries what's new.
+name: Upstream sync
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # daily, 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'linh-pham-codeleap/codegraph'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # A PAT with Contents, Pull requests and Workflows write is only
+          # needed when upstream changes .github/workflows/ (GITHUB_TOKEN
+          # may not push workflow changes). Falls back to GITHUB_TOKEN.
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/colbymchenry/codegraph.git
+          git fetch --no-tags upstream main
+
+      - name: Open or refresh sync PR
+        env:
+          GH_TOKEN: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+        run: |
+          behind=$(git rev-list --count origin/main..upstream/main)
+          if [ "$behind" -eq 0 ]; then
+            echo "main already contains upstream/main"
+            exit 0
+          fi
+
+          git push --force origin upstream/main:refs/heads/upstream-sync
+
+          {
+            echo "Upstream \`colbymchenry/codegraph\` main has **$behind** new commit(s)."
+            echo
+            echo "Merge with a **merge commit** (not squash/rebase). Resolve any conflicts with fork-only changes here."
+            echo
+            echo "### Commits"
+            git log --no-merges --format='- %h %s' origin/main..upstream/main | head -100
+            if [ "$behind" -gt 100 ]; then echo "- … and more"; fi
+            echo
+            echo "### CFML-related"
+            git log --no-merges --format='- %h %s' -i --grep='cfml\|cfscript\|coldfusion' origin/main..upstream/main || true
+          } > body.md
+
+          pr=$(gh pr list --head upstream-sync --base main --state open --json number --jq '.[0].number // empty')
+          if [ -n "$pr" ]; then
+            gh pr edit "$pr" --title "chore: sync upstream ($behind new commits)" --body-file body.md
+            echo "Updated PR #$pr"
+          else
+            gh pr create --base main --head upstream-sync \
+              --title "chore: sync upstream ($behind new commits)" --body-file body.md
+          fi
